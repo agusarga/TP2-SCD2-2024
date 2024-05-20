@@ -32,6 +32,27 @@ Q = diag([1 10000 1]);
 R = 1;
 K = lqr(A,B,Q,R);
 
+%LQR MANUAL
+%Hamiltoniano
+H=[A -B*inv(R)*B'; -Q -A'];
+[vects,autovals]=eig(H);  %columnas de vects: autovectores
+%Debo extraer solo los autovectores cuyos autovalores son negativos:
+autovects_neg=[];
+for i=1:1:length(autovals)
+    if (real(autovals(i,i)))<0
+        autovects_neg=[autovects_neg vects(:,i)];
+    end
+end    
+
+%divido la matriz de autovectores en 2 matrices:
+[filas,colums]=size(autovects_neg);
+M=autovects_neg(1:(filas/2),:);
+PM=autovects_neg((filas/2+1):filas,:);
+P=real(PM*inv(M));
+
+%Con la matriz P construyo el controlador
+Kman=inv(R)*B'*P;
+
 % Ganancia de prealimentación
 G = -inv(C*inv(A-B*K)*B);
 
