@@ -1,0 +1,116 @@
+clc; clear ; close all;
+
+% Parametros
+a = 0.07;
+b = 5;
+c = 150;
+w = 9;
+
+% Matrices   ;   X = [alfa phi phi_p h]
+Atc = [-a a 0 0 ; 0 0 1 0 ; w^2 -w^2 0 0 ; c 0 0 0];
+Btc = [0 ; 0 ; w^2*b ; 0];
+Ctc = [0 0 0 1];
+Dtc = 0;
+
+%30 veces menor que la parte real de los polos como por ejemplo ts=0,016seg.
+Ts = 0.02;
+sys = ss(Atc, Btc, Ctc, Dtc);
+sys_d = c2d(sys, Ts, 'zoh');
+
+A = sys_d.a;
+B = sys_d.b;
+C = sys_d.c;
+
+% Polos del sistema
+p1 = exp((-15 + 15i) * Ts);
+p2 = exp((-15 - 15i) * Ts);
+p3 = exp((-0.5 + 0.5i) * Ts);
+p4 = exp((-0.5 - 0.5i) * Ts);
+
+p = [p1 p2 p3 p4];
+
+% Verifico controlabilidad
+M = [B A*B A^2*B A^3*B];
+% rango = rank(M) = 4 es controlable
+
+% Obtencion de K MANUAL
+a0 = 1;
+a1 = -p1 - p2 - p3 - p4;
+a2 = p1*p2 + p1*p3 + p1*p4 + p2*p3 + p2*p4 + p3*p4;
+a3 = -p1*p2*p3 - p1*p2*p4 - p1*p3*p4 - p2*p3*p4;
+a4 = p1*p2*p3*p4;
+phi_A = a0*A^4 + a1*A^3 + a2*A^2 + a3*A^1 + a4*A^0;
+
+AUX = [B A*B A*A*B A*A*A*B];
+K = [0 0 0 1] * inv(AUX) * phi_A; % uso la formula de ackermann
+
+% OBTENCION DE K AUTOMATICO
+K2 = place(A, B, p); % verifico que el controlador sea el mismo
+
+% Ganancia de referencia
+G = -inv(C * inv(A - B * K) * B);
+
+t_etapa = Ts ;
+tF = 70;
+Kmax = tF / Ts; 
+t = 0:t_etapa:tF;
+pasos = round(tF / t_etapa);
+
+% ent = 0*t + 500; % referencia 1
+ent = 0*t + 500; % referencia 2
+
+% Condiciones iniciales
+x0 = [0 0 0 100];
+alfa(1) = 0;
+fi(1) = 0;
+fi_p(1) = 0;
+h(1) = 100; % altura inicial 2
+u = zeros(1, Kmax); % Inicializo u con ceros
+ua = zeros(1, length(t)); % Inicializo ua con ceros
+
+z = 1;
+for i = 1:Kmax
+    x = [alfa(i); fi(i); fi_p(i); h(i)];
+    u(i) = -K * x(1:4) + ent(i) * G;
+    for j = 1:Ts/t_etapa
+        ua(z) = u(i);
+        % Ecuaciones diferenciales
+        alfa_p = a * (fi(z) - alfa(z));
+        fi_pp = -w^2 * (fi(z) - alfa(z) - b * ua(z));
+        h_p = c * alfa(z);
+
+        alfa(z+1) = alfa(z) + t_etapa * alfa_p;
+        fi_p(z+1) = fi_p(z) + t_etapa * fi_pp;
+        fi(z+1) = fi(z) + t_etapa * fi_p(z);
+        h(z+1) = h(z) + t_etapa * h_p;
+
+        z = z + 1;
+    end
+end
+
+figure; hold on; grid on;
+plot(t, h);
+plot(t, ent, 'k');
+title('Altura del avión');
+xlabel('Tiempo [s]');
+ylabel('Altura [m]');
+
+figure; hold on; grid on;
+plot(t, alfa);
+title('Ángulo con la horizontal');
+xlabel('Tiempo [s]');
+ylabel('Ángulo [rad]');
+
+figure; hold on; grid on;
+plot(t, fi);
+title('Ángulo de cabeceo');
+xlabel('Tiempo [s]');
+ylabel('Ángulo [rad]');
+
+figure; hold on; grid on;
+plot(t, ua);
+title('Acción de control');
+xlabel('Tiempo [s]');
+ylabel('');
+
+disp('Terminado')
