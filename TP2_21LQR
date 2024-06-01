@@ -13,7 +13,7 @@ Ctc = [0 0 0 1];
 Dtc = 0;
 
 %30 veces menor que la parte real de los polos como por ejemplo ts=0,016seg.
-Ts = 1e-3;
+Ts = 0.01;
 sys = ss(Atc, Btc, Ctc, Dtc);
 sys_d = c2d(sys, Ts, 'zoh');
 
@@ -33,13 +33,38 @@ M=[BB AA*BB AA^2*BB AA^3*BB AA^4*BB  AA^5*BB];
 rank(M) %=5, n=5 -> es controlable
 
 %Diseï¿½o con LQR
-QQ=1e-15*diag([1 1 1/10 1/100000 .01]);    RR=1;
+Q=diag([1 1 10000000 1000 0.1]);    R=1;
 
-KK=dlqr(AA,BB,QQ,RR);
+KK=dlqr(AA,BB,Q,R);
 %KK=[K -Ki]
 eig(AA-BB*KK) %polos de lazo cerrado
 K=KK(1:4);
 Ki=-KK(5);
+
+%LQR MANUAL
+%Hamiltoniano
+H=[AA + BB*inv(R)*BB'*inv(AA')*Q -BB*inv(R)*BB'*inv(AA'); -inv(AA')*Q inv(AA')];
+[vects,autovals]=eig(H);  %columnas de vects: autovectores
+%Debo extraer solo los autovectores cuyos autovalores son negativos:
+autovects_neg=[];
+for i=1:1:length(autovals)
+    if (abs(autovals(i,i)))<1
+        autovects_neg=[autovects_neg vects(:,i)];
+    end
+end    
+
+%divido la matriz de autovectores en 2 matrices:
+[filas,colums]=size(autovects_neg);
+M=autovects_neg(1:(filas/2),:);
+PM=autovects_neg((filas/2+1):filas,:);
+P=real(PM*inv(M));
+
+%Con la matriz P construyo el controlador
+Kman=inv(R+BB'*P*BB)*BB'*P*AA;
+
+K_i = -Kman(5);
+K = Kman(1:4);
+Kn = [K -K_i];
 
 
 t_etapa=1e-4;
