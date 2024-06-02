@@ -1,0 +1,160 @@
+clc; clear ; close all;
+
+% Parametros
+a = 0.07;
+b = 5;
+c = 150;
+w = 9;
+
+% Matrices   ;   X = [alfa phi phi_p h]
+Atc = [-a a 0 0 ; 0 0 1 0 ; w^2 -w^2 0 0 ; c 0 0 0];
+Btc = [0 ; 0 ; w^2*b ; 0];
+Ctc = [0 0 0 1; 1 0 0 0];
+Dtc = 0;
+
+%30 veces menor que la parte real de los polos como por ejemplo ts=0,016seg.
+Ts = 0.001;
+sys = ss(Atc, Btc, Ctc, Dtc);
+sys_d = c2d(sys, Ts, 'zoh');
+
+A = sys_d.a;
+B = sys_d.b;
+C = sys_d.c;
+
+%Agrego un integrador para trabajar a lazo cerrado:
+%Amplio el sistema
+
+AA=[A,zeros(4,1);-C(1,:)*A, eye(1)];
+BB=[B;-C(1,:)*B];
+CC=[C(1,:) zeros(1,1)];
+
+%Verifico controlabilidad
+M=[BB AA*BB AA^2*BB AA^3*BB AA^4*BB  AA^5*BB];
+rank(M) %=5, n=5 -> es controlable
+%Verifico observabilidad
+Q0=[C; C*A; C*A^2; C*A^3];
+rank(Q0) %=4, m=4 -> es observable
+
+% Matrices del sistema observador
+Ao = A';
+Bo = C';
+Co = B';
+
+%Diseï¿½o con LQR
+Q=1e-14*diag([1 1 1/10 1/100000 500]);    R=100;
+KK=dlqr(AA,BB,Q,R);
+%KK=[K -Ki]
+eig(AA-BB*KK) %polos de lazo cerrado
+K=KK(1:4);
+Ki=-KK(5);
+
+%LQR MANUAL
+%Hamiltoniano
+H=[AA + BB*inv(R)*BB'*inv(AA')*Q -BB*inv(R)*BB'*inv(AA'); -inv(AA')*Q inv(AA')];
+[vects,autovals]=eig(H);  %columnas de vects: autovectores
+%Debo extraer solo los autovectores cuyos autovalores son negativos:
+autovects_neg=[];
+for i=1:1:length(autovals)
+    if (abs(autovals(i,i)))<1
+        autovects_neg=[autovects_neg vects(:,i)];
+    end
+end    
+
+%divido la matriz de autovectores en 2 matrices:
+[filas,colums]=size(autovects_neg);
+M=autovects_neg(1:(filas/2),:);
+PM=autovects_neg((filas/2+1):filas,:);
+P=real(PM*inv(M));
+
+%Con la matriz P construyo el controlador
+Kman=inv(R+BB'*P*BB)*BB'*P*AA;
+
+K_i = -Kman(5);
+K = Kman(1:4);
+Kn = [K -K_i];
+
+%LQR DEL OBSERVADOR
+Qo = diag([1 1/1 1/1 1]);
+Ro = [1 0; 0 1];
+Ko = dlqr(Ao,Bo,Qo,Ro);
+
+t_etapa=1e-4;
+tF = 70;
+Kmax = tF / Ts; 
+pasos = round(tF / t_etapa);
+t=0:t_etapa:(tF+tF);
+ta=0:t_etapa:(tF+0.3*tF-t_etapa);
+
+% ent = 0*t + 500; % referencia 1
+ent = -500*ones(1,length(ta)); % referencia 2
+
+% Condiciones iniciales
+x=zeros(5,pasos);
+x0 = [0 0 0 100 0];% altura inicial 2
+x(1,1)=x0(1);
+x(2,1)=x0(2);
+x(3,1)=x0(3);
+x(4,1)=x0(4);
+
+Xhat(1,1) = x0(1);
+Xhat(2,1) = x0(2); 
+Xhat(3,1) = x0(3);
+Xhat(4,1) = x0(4);
+z = 1;
+x_ts=x((1:4),1);
+v_ts=x(5,1);
+alin=0.1;
+for i = 1:1:Kmax+1
+     x_k=x_ts;
+     v_k=v_ts;
+     
+    uc = -K(2:4)*x_k(2:4)-K(1)*Xhat(1) + Ki*v_k;
+    % Alinealidad
+    if abs(uc)< alin
+        u = 0;
+    else
+        u = uc;
+    end
+    
+    ys=C*x(1:4,z); %Salida de dos componentes
+    for j = 1:1:Ts/t_etapa
+        ua(z) = u;
+        % Ecuaciones diferenciales
+        x_p_actual=Atc*x(1:4,z)+Btc*u;
+        x((1:4),z+1)=x((1:4),z)+t_etapa*x_p_actual;
+        z = z + 1;
+    end
+    
+    yhat=C*Xhat;
+    e=ys-yhat;
+    Xhat=A*Xhat+B*u+Ko'*e;
+    v_ts=v_ts+ent(z)-C(1,:)*x_ts;
+    x_ts=x((1:4),z);
+end
+
+figure; hold on; grid on;
+plot(t(1:length(x(4,:))),x(4,:));
+plot(t(1:length(ent)),ent, 'k');
+title('Altura del avión');
+xlabel('Tiempo [s]');
+ylabel('Altura [m]');
+
+figure; hold on; grid on;
+plot(t(1:length(x(1,:))),x(1,:));
+title('Ángulo con la horizontal');
+xlabel('Tiempo [s]');
+ylabel('Ángulo [rad]');
+
+figure; hold on; grid on;
+plot(t(1:length(x(2,:))),x(2,:));
+title('Ángulo de cabeceo');
+xlabel('Tiempo [s]');
+ylabel('Ángulo [rad]');
+
+figure; hold on; grid on;
+plot(t(1:length(ua)),ua);
+title('Acción de control');
+xlabel('Tiempo [s]');
+ylabel('');
+
+disp('Terminado')
